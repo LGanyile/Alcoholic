@@ -1,0 +1,768 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      // get - used if a client with want to read this document.
+      // list - used if there is going to be a query returning this document.
+      // To make this rule cascade I'll have to use restOfPath=** wildcard otherwise it won't.
+      allow read, write: if false;
+    }
+
+     match /data/{foobar} {
+      allow read, write: if request.auth != null;
+    }
+
+    //========================For Alcoholic=========================
+
+    function isLoggedInAdmin(){
+      return request.auth != null && 
+      get(/databases/$(database)/documents/users/
+      $(request.auth.uid)).data.isAdmin == true;
+    }
+
+    function isLoggedInStoreOwner(){
+      return request.auth != null &&
+      get(/databases/$(database)/documents/users/
+      $(request.auth.uid)).data.isOwner == true;
+    }
+
+    function hasLoggedInAndOwnsThisStore(storeId){
+      return isLoggedInStoreOwner() &&
+      request.auth.uid == get(/databases/
+      $(database)/documents/stores/$(storeId))
+      .data.storeOwner.userId; 
+      
+              
+    }
+
+    function isLoggedInStoreMember(storeId){
+      return request.auth != null && exists(
+      /databases/$(database)/documents/stores/
+      $(storeId)/store_joined_members/$(request.auth.uid));
+    }
+
+    function canBeg(){
+
+          return 
+
+          // Must not beg yourself.
+          get(/databases/$(database)/documents/won_prices_summaries/
+          $(wonPriceSummaryId)).data.user.userId != request.auth.uid &&
+
+          // Must know the winner.
+          exists(/databases/$(database)/documents/users/$(get(/databases/$(database)/documents/won_prices_summaries/
+          $(wonPriceSummaryId)).data.user.userId)/'people_who_know_you'/$(request.auth.uid)); 
+    }
+
+    
+    match /recent_wins/{recentWinId}{
+
+      // Use Case #13b [read] - Already Used For Use Case Diagram Modelling.
+      // Everybody can see recent wins(checked).
+      // read - Invoked Every Time A User Views The Recent Won Prices Screen (Screen 1).
+      allow read: if true; 
+
+      // Use Case #13a [read] - Already Used For Use Case Diagram Modelling.
+      allow create: if false;
+
+    }
+
+    
+    
+    match /won_prices_summaries/{wonPriceSummaryId}{
+      
+      // Everybody can see a won price(checked).
+      // Use Case #8b [read] - Already Used For Use Case Diagram Modelling.
+      // read - Invoked Each Time A Recent Winner's Image Is Clicked(Screen 1.1).
+      allow read: if true; 
+      
+      // create - // Invoked Whenever Somebody Wins A Competition. <<<cloud function>>>
+      // Use Case #8a, #8c [read] - Already Used For Use Case Diagram Modelling.
+      // create - Invoked Whenever Somebody Wins A Competition.  <<<cloud function>>>
+      allow write: if false;
+
+      
+      
+
+      match /comments/{commentId}{
+        
+        // Use Case #12 [create] - Already Used For Use Case Diagram Modelling.
+        allow create: if isLoggedInAdmin()==false && (isLoggedInStoreOwner()==false 
+        || hasLoggedInAndOwnsThisStore(request.resource.data.storeOriginId)) && 
+        request.auth != null;
+
+        // Use Case #12 [update, delete] - Already Used For Use Case Diagram Modelling.
+        allow update, delete: if request.auth != null && 
+        request.auth.uid == resource.data.creatorUserId &&
+        isLoggedInAdmin()==false;
+
+        // Use Case #12 [read] - Already Used For Use Case Diagram Modelling.
+        allow read: if true;
+
+      }
+
+      match /beg_requests/{begRequestId}{
+        
+        // Everybody can see begging requests(checked).
+        // read - // Invoked By A User When Viewing A Winner's Beggers(Screen 1.1.1).
+        allow read: if true; 
+        // 1. Only allow logged in users to beg, however they can't beg themselves(checked).
+        // 2. Remember to make sure the begger knows the winner(checked).
+        // 3. Lastly recall to only allow one beg request for each user(not checked).
+        // create - // Invoked Whenever Any User Is Begging A Winner.
+        allow create: if request.auth != null &&
+        
+        // Must not beg yourself.
+          get(/databases/$(database)/documents/won_prices_summaries/
+          $(wonPriceSummaryId)).data.user.userId != request.auth.uid &&
+
+          
+          // Begger must be a winners alcoholic.
+          exists(/databases/$(database)/documents/users/$(get(/databases/
+          $(database)/documents/won_prices_summaries/$(wonPriceSummaryId))
+          .data.user.userId)/my_alcoholics/$(request.auth.uid)) &&
+
+          // Winner must be a begger's alcoholic.
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)
+          /my_alcoholics/$(get(/databases/
+          $(database)/documents/won_prices_summaries/$(wonPriceSummaryId))
+          .data.user.userId));
+        
+      }
+    }
+
+    
+    match /found_alcohol/{foundAlcoholId}{
+
+      // Use Case #9b [create, update] - Already Used For Use Case Diagram Modelling.
+      // read - 1. Invoked By Default During The Search Of An Alcohol If It Name Is Not Given(Screen 2).
+      //        2. Invoked By A User When Searching For Some Alcohol By Name(Screen 2.1).
+      allow read: if true; 
+
+      // Use Case #9a [create, update] - Already Used For Use Case Diagram Modelling.
+      // create - Invoked Each Time A Competition Is Created Is Saved.
+      allow create: if false;
+
+      // Use Case #9a [create, update] - Already Used For Use Case Diagram Modelling.
+      // delete - Automatically Invoked Everytime A Competition Finishes.
+      allow delete: if false;
+
+
+    }
+
+    
+    match /found_stores_with_competition/{foundStoresWithCompetitionId}{
+      
+      // Use Case #10b [create] - Already Used For Use Case Diagram Modelling.
+      // create - Invoked Each Time A Competition Is Created.
+      allow create, update:if false;
+
+      // Use Case #10b [delete] - Already Used For Use Case Diagram Modelling.
+      // delete - Automatically Invoked If It Is Time For A Competition To Begin.
+      allow delete: if false;
+
+      // Use Case #10d, #11 [list] - Already Used For Use Case Diagram Modelling.
+      allow list: if true; 
+      
+      // 6
+      match /found_grand_prices/{foundGrandPriceId}{
+      
+        // Use Case #10b [create] - Already Used For Use Case Diagram Modelling.
+        // create - Invoked Each Time A Grand Price Is Saved.
+        allow create:if false;
+        
+        // Use Case #10d, #11 [read] - Already Used For Use Case Diagram Modelling.
+        // read - Invoked After A Store Without Competition Is Found.
+        allow read: if resource.data.owningStoreFK==foundStoresWithCompetitionId; 
+
+        // Use Case #10b [delete] - Already Used For Use Case Diagram Modelling.
+        // delete - Automatically Invoked If It Is Time For A Competition To Begin.
+        // update - Not Allowed At All.
+        allow delete, update: if false;
+
+      }
+    }
+  
+    match /found_stores_with_winner/{foundStoresWithWinnerId}{
+
+      // Use Case #10c [create] - Already Used For Use Case Diagram Modelling.
+      // create - Invoked Each Time There Is A Winner.
+      // update - Not Allowed At All.
+      allow create, update:if false;
+      
+      // Use Case #10c [delete] - Already Used For Use Case Diagram Modelling.
+      // delete - Automatically Invoked After 24 Hours If And Only If Somebody Has 
+      //          Won And There Are Comming Competition(s) To Be Entered For The Store.
+      allow delete: if false;
+
+      // Use Case #10d, #11 [list] - Already Used For Use Case Diagram Modelling.
+      allow read: if true; 
+      
+    }
+
+    match /found_stores_without_competition/{foundStoresWithoutCompetitionId}{
+      
+      // Use Case #10a [create] - Already Used For Use Case Diagram Modelling.
+      // create - Automatically Invoked If It Is Time For A Competition To Begin.
+      // update - Not Allowed At All.
+      allow create, update:if false;
+
+
+      // Use Case #10a [delete] - Already Used For Use Case Diagram Modelling.
+      // delete - Automatically Invoked After The Competition Has Completed.
+      allow delete: if false;
+
+      // Use Case #10d, #11 [list] - Already Used For Use Case Diagram Modelling.
+      allow read: if true; 
+      
+      
+    }
+
+    match /all_alcohol/{alcoholId}{
+      
+      // Use Case #0.1a, #0.3a, #0.4a [create, update, delete] - Already Used For Use Case Diagram Modelling.
+      allow write: if isLoggedInAdmin();
+
+      // Use Case #0.2a [read] - Already Used For Use Case Diagram Modelling.
+      allow read: if isLoggedInStoreOwner() || isLoggedInAdmin();
+
+      
+      
+    }
+
+    match /available_alcohol/{alcoholId}{
+      
+      // Use Case # [create] - Already Used For Use Case Diagram Modelling.
+      // create - Automatically Created If There Is A New Store
+      //          To Register Which Is The First One Residing There.
+      allow create: if false;
+
+      // Use Case # [update] - Already Used For Use Case Diagram Modelling.
+      allow update: if isLoggedInAdmin();
+
+      // read - // Anybody Can Read A Location.
+      allow read: if true;
+    }
+
+    match /all_locations/{locationId}{
+
+      // Use Case #0.1b [create] - Already Used For Use Case Diagram Modelling.
+      // create - // Only Admins Can Create A Location.
+      allow create: if isLoggedInAdmin();
+
+      // Use Case #0.3b [update] - Already Used For Use Case Diagram Modelling.
+      // update - // Only Admins Can Update A Location.
+      allow update: if isLoggedInAdmin();
+
+      // Use Case #0.2b [read] - Already Used For Use Case Diagram Modelling.
+      // read - // Only Store Owners And Admins Can Read A Location.
+      allow read: if isLoggedInAdmin() || isLoggedInStoreOwner();
+
+      allow delete: if false;
+    }
+
+    match /available_locations/{locationId}{
+
+      // Use Case # [create] - Already Used For Use Case Diagram Modelling.
+      // create - Automatically Created If There Is A New Store
+      //          To Register Which Is The First One Residing There.
+      allow create: if false;
+
+      // Use Case # [update] - Already Used For Use Case Diagram Modelling.
+      allow update: if isLoggedInAdmin();
+
+      // read - // Anybody Can Read A Location.
+      allow read: if true;
+    }
+
+    
+    match /competitions/{competitionId}{
+      
+      // Use Case #7a [create] - Already Used For Use Case Diagram Modelling.
+      // create - Automatically invoked when a competition is created(Screen 10.2.1).
+      allow create: if false;
+
+      // Use Case #7b [get] - Already Used For Use Case Diagram Modelling.
+      // get - Invoked whenever one needs to view the competition(Screen 6.1.1).
+      allow get: if true; 
+      
+      // Use Case #5b [update] - Already Used For Use Case Diagram Modelling.
+      // update - Automatically called by a program each time a grand price pointer is updated(Screen 2.2.1).
+      allow update: if false;
+
+      // Use Case # [delete] - Already Used For Use Case Diagram Modelling.
+      // delete - Invoked by an admin to get rid of the inconvenient competitions.
+      allow delete: if isLoggedInAdmin();
+
+       // No # 
+      // get - No one can query these competitions.
+      allow list: if false;
+      
+      
+      match /grand_prices_grid/{grandPriceGridId}{
+        
+        // Use Case #7a [create] -Already Used For Use Case Diagram Modelling.
+        // create - Automatically invoked after a competition is saved by a store owner(Screen 2.2.1).
+        allow create: if false;
+
+        // Use Case #7b [get] -Already Used For Use Case Diagram Modelling.
+        // get - Invoked whenever a competition is viewed(Screen 6.1.1).
+        allow get: if true;
+
+        // Use Case #5b [update] - Already Used For Use Case Diagram Modelling.
+        // update - Automatically called each time a grand price pointer is updated(Screen 2.2.1).
+        allow update: if false;
+
+        // 24
+        match /grand_price_tokens/{grandPriceTokenId}{
+
+          // Use Case #7a [create] -Already Used For Use Case Diagram Modelling.
+          // create - Automatically invoked when a competition grand price grid is created(Screen 2.2.1).
+          allow create: if false;
+
+          // Use Case #5b [update] - Already Used For Use Case Diagram Modelling.
+          // update - Automatically called each time a grand price pointer is updated(Screen 2.2.1).
+          allow update: if false; 
+
+          // Use Case #7b [get] -Already Used For Use Case Diagram Modelling.
+          // get - Invoked whenever one needs to view the competition(Screen 6.1.1).
+          allow get: if true;
+
+          // Use Case # [get] -Already Used For Use Case Diagram Modelling.
+          // list - Invoked when the competitions is about to begin(Screen 2.2.1).
+          allow list: if true;  
+        }
+      
+      }
+
+      match /competitors_grid/{competitorGridId}{
+        
+        // Use Case #7a [create] - Already Used For Use Case Diagram Modelling.
+        // create - Automatically invoked after a competition is saved by a store owner(Screen 2.2.1.1).
+        allow create: if false;
+
+        // Use Case #5b [update] - Already Used For Use Case Diagram Modelling.
+        // update - Automatically called each time a competitor pointer is updated(Screen 2.2.1).
+        allow update: if false;
+
+        // Use Case #7b [get] -Already Used For Use Case Diagram Modelling.
+        // get - Invoked only once during the process of picking a winner(Screen 2.2.1.1).
+        allow get: if true; 
+
+        // 26
+        match /competitors_tokens/{competitorTokenId}{
+          
+          // Use Case #7a [create] - Already Used For Use Case Diagram Modelling.
+          // create - Automatically invoked when a competition competitor grid is created(Screen 10.2.1).
+          allow create: if false;
+
+          // Use Case #5b [update] - Already Used For Use Case Diagram Modelling.
+          // update - Automatically called each time a grand price pointer is updated(Screen 2.2.1.1).
+          allow update: if false;
+
+          // Use Case #7b [get] -Already Used For Use Case Diagram Modelling.
+          // read - Invoked when the competitions has began, a price to win is chosen and a competitor to win is about to be picked.
+          allow get: if true; 
+
+          // Use Case # [get] -Already Used For Use Case Diagram Modelling.
+          // list - Invoked when the competitions is about to begin(Screen 2.2.1).
+          allow list: if true; 
+          
+        }
+      }
+
+      match /competition_joined_members/{competitionJoinedMemberUserId}{
+          
+          // Use Case #7a [create] -Already Used For Use Case Diagram Modelling.
+          // create - Only owners can add/remove a member to a competition and if and only if they own the hosting store.
+          allow create, delete: if false;
+
+          // Use Case # [read] -Already Used For Use Case Diagram Modelling.
+          // read - Everyone can see who has joined a competition.
+          allow read: if true;
+
+          // Not Teste
+          // Use Case # [update] -Already Used For Use Case Diagram Modelling.
+          // update - A logged in user who happens to have joined a store competition can only change his/her image.
+          allow update: if request.auth != null &&
+            request.resource.data.competitionJoinedMemberId == resource.data.competitionJoinedMemberId &&
+            request.resource.data.competitionFK == resource.data.competitionFK &&
+            request.resource.data.threeCharacters == resource.data.threeCharacters;
+          
+      }
+
+      
+    }
+
+    // To Be Tested
+    match /users/{userId}{
+      //==============================================
+      allow read: if true;
+
+      match /my_alcoholics/{alcoholicId}{
+
+        allow read: if true;
+      }
+      //==============================================
+
+      // Use Case #1.1a, #1.2 [create] - Already Used For Use Case Diagram Modelling.
+      // Only allow a creation of a new user during a registration.
+      allow create: if request.auth == null && request.resource.data.isAdmin==false;
+      
+    }
+
+
+    match /stores/{storeId}{
+      
+      // Use Case #1.1b [create] - Already Used For Use Case Diagram Modelling.
+      // 1. Only allow a creation of a new store during a registration of a new store owner.
+      // Called Each Time A New Store Is Registered.
+      allow create: if request.auth == null &&
+      request.resource.data.storeId != null &&
+      request.resource.data.storeName != null &&
+      request.resource.data.storeImageLocation != null &&
+      request.resource.data.sectionName != null &&
+      request.resource.data.storeOwner != null;
+      
+      // Use Case #1.1c [update] - Already Used For Use Case Diagram Modelling.
+      // Only logged in store owners can update their store.
+      allow update: if hasLoggedInAndOwnsThisStore(storeId);
+      
+      // Use Case #1.1d [delete] - Already Used For Use Case Diagram Modelling.
+      // Only admins can delete a store.
+      allow delete: if isLoggedInAdmin();
+
+      // Any logged in store owner or admin can read store's info.
+      allow read: if isLoggedInAdmin() || isLoggedInStoreOwner();
+                    
+      match /store_joined_members/{userId}{
+
+        // Use Case #2.1 [create] - Already Used For Use Case Diagram Modelling.
+        // Only allow logged in users to join store.
+        allow create: if 
+        request.auth != null && 
+        isLoggedInStoreMember(storeId)==false && 
+        isLoggedInStoreOwner()==false &&
+        isLoggedInAdmin()==false ; 
+
+        // Use Case #2.2, #2.3 [create] - Already Used For Use Case Diagram Modelling.
+        // Only allow store members can leave a store.
+        allow delete: if request.auth != null && 
+        (hasLoggedInAndOwnsThisStore(storeId) ||
+        (isLoggedInStoreMember(storeId) && 
+        resource.data.userId == userId)); 
+
+        // Use Case #2.4 [read] - Already Used For Use Case Diagram Modelling.
+        // Everybody can view joined members for a store.
+        allow read: if true; 
+
+        // Joined members can only update their displayed competition image.
+        allow update: if request.resource.data.storeJoinedMemberId == resource.data.storeJoinedMemberId &&
+        request.resource.data.userId == resource.data.userId &&
+        request.resource.data.threeCharacters == resource.data.threeCharacters &&
+        request.resource.data.storeFK == resource.data.storeFK;
+      }
+
+      match /store_alcohol/{storeAlcoholId}{
+
+        // Use Case #3 [write] - Already Used For Use Case Diagram Modelling.
+        // Only the owner of this store can create, update or delete store alcohol.
+        allow create, delete: if hasLoggedInAndOwnsThisStore(storeId);
+
+        // Use Case #3 [read] - Already Used For Use Case Diagram Modelling.
+        // Anybody can find this information.
+        allow read: if isLoggedInStoreOwner() ||
+        isLoggedInAdmin() ||
+        isLoggedInStoreMember(storeId);
+
+      }
+
+      match /store_competitions/{competitionId}{
+       
+        // Use Case #4 [create] - Already Used For Use Case Diagram Modelling.
+        // create - Automatically invoked when a competition is created(Screen 10.2.1).
+        allow create: if request.auth != null && 
+        hasLoggedInAndOwnsThisStore(request.resource.data.storeFK);
+
+         // Use Case #7a [get] - Already Used For Use Case Diagram Modelling.
+        allow get: if true;
+
+        // Use Case #7a [list] - Already Used For Use Case Diagram Modelling.
+        allow list: if isLoggedInStoreMember(storeId); 
+      
+        // Use Case #5 [update] - Already Used For Use Case Diagram Modelling.
+        allow update: if hasLoggedInAndOwnsThisStore(storeId);
+
+        // Use Case #6a, #6b [delete] - Already Used For Use Case Diagram Modelling.
+        // delete - Invoked by an admin to get rid of the inconvenient competitions.
+        allow delete: if hasLoggedInAndOwnsThisStore(storeId);
+      
+  
+        match /grand_prices_grid/{grandPriceGridId}{
+        
+          // Use Case #4.1a [create] - Already Used For Use Case Diagram Modelling.
+          // create - Saved together with a stores's competitoin.
+          allow create: if hasLoggedInAndOwnsThisStore(storeId) &&
+          request.resource.data.competitionFK==competitionId;
+
+          // Use Case #4.2a [update] - Already Used For Use Case Diagram Modelling.
+          // update - Automatically called each time a grand price pointer is updated(Screen 2.2.1).
+          allow update: if hasLoggedInAndOwnsThisStore(storeId);
+
+          // Use Case #4.4a, # [get] - Already Used For Use Case Diagram Modelling.
+          // get - Invoked whenever a competition is viewed(Screen 6.1.1).
+          allow get: if true;
+
+          // Use Case #4.3a, # [delete] - Already Used For Use Case Diagram Modelling.
+          allow delete: if hasLoggedInAndOwnsThisStore(storeId);
+
+          
+          match /grand_price_tokens/{grandPriceTokenId}{
+
+            // Use Case #4.1a [create] - Already Used For Use Case Diagram Modelling.
+            // create - Saved together with a stores's competitoin.
+            allow create: if hasLoggedInAndOwnsThisStore(storeId) &&
+            request.resource.data.competitionGrandPricesGridFK==grandPriceGridId;
+
+            // Use Case #4.2a [update] - Already Used For Use Case Diagram Modelling.
+            // update - Automatically called each time a grand price pointer is updated(Screen 2.2.1).
+            allow update: if false; 
+
+            // Use Case #4.4a [get] - Already Used For Use Case Diagram Modelling.
+            // get - Invoked whenever one needs to view the competition(Screen 6.1.1).
+            allow get: if true;
+
+            // Use Case #4.4a [list] - Already Used For Use Case Diagram Modelling.
+            // list - Invoked when the competitions is about to begin(Screen 2.2.1).
+            allow list: if true;  
+
+            // Use Case #4.3a [get] - Already Used For Use Case Diagram Modelling.
+            allow delete: if hasLoggedInAndOwnsThisStore(
+            get(/databases/$(database)/documents/competitions/
+            $(competitionId)).data.storeFK);
+          }
+        } 
+      
+        
+        match /competitors_grid/{competitorGridId}{
+          
+          // Use Case #4.1b [create] - Already Used For Use Case Diagram Modelling.
+          // create - Automatically invoked after a competition is saved by a store owner(Screen 2.2.1.1).
+          allow create: if hasLoggedInAndOwnsThisStore(storeId) &&
+          request.resource.data.competitionFK==competitionId;
+
+          // Use Case #4.4b [update] - Already Used For Use Case Diagram Modelling.
+          // update - Automatically called each time a competitor pointer is updated(Screen 2.2.1).
+          allow update: if false;
+
+          // Use Case #4.3b [get] - Already Used For Use Case Diagram Modelling.
+          // get - Invoked only once during the process of picking a winner(Screen 2.2.1.1).
+          allow get: if true; 
+
+          match /competitors_tokens/{competitorTokenId}{
+          
+            // Use Case #4.1b, #4.2b [create, delete] - Already Used For Use Case Diagram Modelling.
+            // create - Automatically invoked when a competition competitor grid is created(Screen 10.2.1).
+            allow create, delete: if hasLoggedInAndOwnsThisStore(storeId) &&
+            request.resource.data.competitionCompetitorsGridFK==competitorGridId;
+
+            // Use Case #4.4b [update] - Already Used For Use Case Diagram Modelling.
+            // update - Automatically called each time a grand price pointer is updated(Screen 2.2.1.1).
+            allow update: if false;
+
+            // Use Case #4.3b [get - Already Used For Use Case Diagram Modelling.
+            // get - Invoked when the competitions has began, a price to win is chosen and a competitor to win is about to be picked.
+            allow get: if true; 
+
+            // Use Case #4.3b [list] - Already Used For Use Case Diagram Modelling.
+            allow list: if true; 
+          
+          }
+        }
+
+        
+        match /competition_joined_members/{competitionJoinedMemberUserId}{
+          
+          // Use Case #4.1b [get - Already Used For Use Case Diagram Modelling.
+          // create - Only owners can add/remove a member to a competition and if and only if they own the hosting store.
+          allow create, delete: if hasLoggedInAndOwnsThisStore(storeId);
+
+          // Use Case #4.3b [get - Already Used For Use Case Diagram Modelling.
+          // read - Everyone can see who has joined a competition.
+          allow read: if true;
+
+          // Use Case #4.4b [get - Already Used For Use Case Diagram Modelling.
+          // Not Tested
+          // update - A logged in user who happens to have joined a store competition can only change his/her image.
+          allow update: if request.auth != null &&
+                request.resource.data.competitionJoinedMemberId == resource.data.competitionJoinedMemberId &&
+                request.resource.data.competitionFK == resource.data.competitionFK &&
+                request.resource.data.threeCharacters == resource.data.threeCharacters;
+          
+        }
+
+      }
+
+    }
+    
+    match /stores_names_info/{storeNameInfoId}{
+      
+      // Use Case #1.1b, #1.1c, #1.1d [create, update, delete] - Already Used For Use Case Diagram Modelling.
+      // create - Invoked By A Store Owner Each Time A New Store Is Registered. (Screen 1.2)
+      // update - Not Allowed
+      // delete - Invoked Each Time An Admin Deletes A Store.
+      allow write: if false; 
+
+      // Use Case #10d, #11 [read] - Already Used For Use Case Diagram Modelling.
+      // read - Invoked whenever either of the following occured: (Screen 3.1)
+      //            1. The First Time The Stores Tab Is Clicked.
+      //            2. A Search By Store Name Is Initiated.
+      //            3. A Search By Section Name Is Initiated.
+      allow read: if true;
+
+      match /stores_groups/{storeGroupId}{
+
+        // Use Case #1.1b, #1.1c, #1.1d, #14 [create, update, delete] - Already Used For Use Case Diagram Modelling.
+        // create - Automatically called each time a store name is saved. (Screen 1.2)
+        allow write: if false; 
+
+        // Use Case #10d, #11 [read] - Already Used For Use Case Diagram Modelling.
+        // read - Invoked whenever either of the following occured:
+        //            1. The First Time The Stores Tab Is Clicked.
+        //            2. A Search By Store Name Is Initiated.
+        //            3. A Search By Section Name Is Initiated. (Screen 3.1)
+        allow read: if true;
+
+        
+        match /normal_store_posts/{restOfPath=**}{
+          
+          allow create, read: if exists(/databases/$(database)/documents/stores/$
+          (get(/databases/$(database)/documents/stores_names_info/$(storeNameInfoId))
+          .data.storeFK)/store_joined_members/$(request.auth.uid))
+          && 
+          isLoggedInAdmin()==false && isLoggedInStoreOwner()==false;
+
+          allow read: if exists(/databases/$(database)/documents/stores/$
+          (get(/databases/$(database)/documents/stores_names_info/$(storeNameInfoId))
+          .data.storeFK)/store_joined_members/$(request.auth.uid));
+          
+          allow update: if request.auth != null && 
+          isLoggedInAdmin()==false && isLoggedInStoreOwner()==false &&
+          request.auth.uid == resource.data.creatorUserId; 
+
+          allow delete: if request.auth != null && 
+          (
+            isLoggedInAdmin() || 
+          
+            (
+              isLoggedInStoreOwner() &&
+
+              request.auth.uid == get(/databases/$(database)/documents/stores/$(
+              get(/databases/$(database)/documents/stores_names_info/$(storeNameInfoId))
+              .data.storeFK)).data.storeOwner.userId
+
+            ) ||
+          
+            request.auth.uid == resource.data.creatorUserId
+          );
+          
+          
+          //match /store_post_comments/{commentId}{ //(Screen 3.1)
+            // Rules are inherited.
+          //}
+      
+        }
+
+        match /future_store_posts/{restOfPath=**}{
+          
+          allow create, read: if exists(/databases/$(database)/documents/stores/$
+          (get(/databases/$(database)/documents/stores_names_info/$(storeNameInfoId))
+          .data.storeFK)/store_joined_members/$(request.auth.uid))
+          && 
+          isLoggedInAdmin()==false && isLoggedInStoreOwner()==false;
+
+          allow read: if exists(/databases/$(database)/documents/stores/$
+          (get(/databases/$(database)/documents/stores_names_info/$(storeNameInfoId))
+          .data.storeFK)/store_joined_members/$(request.auth.uid));
+          
+          allow update: if request.auth != null && 
+          isLoggedInAdmin()==false && isLoggedInStoreOwner()==false &&
+          request.auth.uid == resource.data.creatorUserId; 
+
+          allow delete: if request.auth != null && 
+          (
+            isLoggedInAdmin() || 
+          
+            (
+              isLoggedInStoreOwner() &&
+
+              request.auth.uid == get(/databases/$(database)/documents/stores/$(
+              get(/databases/$(database)/documents/stores_names_info/$(storeNameInfoId))
+              .data.storeFK)).data.storeOwner.userId
+
+            ) ||
+          
+            request.auth.uid == resource.data.creatorUserId
+          );
+
+          //match /store_post_involved_users/{involvedUserId}{
+
+            // Rules are inherited.
+          //}
+          
+          //match /store_post_comments/{storePostcommentId}{ //(Screen 3.1)
+
+            // Rules are inherited.
+          //}
+      
+        }
+
+        match /past_store_posts/{restOfPath=**}{
+          
+          allow create, read: if exists(/databases/$(database)/documents/stores/$
+          (get(/databases/$(database)/documents/stores_names_info/$(storeNameInfoId))
+          .data.storeFK)/store_joined_members/$(request.auth.uid))
+          && 
+          isLoggedInAdmin()==false && isLoggedInStoreOwner()==false;
+
+          allow read: if exists(/databases/$(database)/documents/stores/$
+          (get(/databases/$(database)/documents/stores_names_info/$(storeNameInfoId))
+          .data.storeFK)/store_joined_members/$(request.auth.uid));
+          
+          allow update: if request.auth != null && 
+          isLoggedInAdmin()==false && isLoggedInStoreOwner()==false &&
+          request.auth.uid == resource.data.creatorUserId; 
+
+          allow delete: if request.auth != null && 
+          (
+            isLoggedInAdmin() || 
+          
+            (
+              isLoggedInStoreOwner() &&
+
+              request.auth.uid == get(/databases/$(database)/documents/stores/$(
+              get(/databases/$(database)/documents/stores_names_info/$(storeNameInfoId))
+              .data.storeFK)).data.storeOwner.userId
+
+            ) ||
+          
+            request.auth.uid == resource.data.creatorUserId
+          );
+
+          //match /store_post_involved_users/{involvedUserId}{
+
+            // Rules are inherited.
+          //}
+          
+          //match /store_post_comments/{storePostcommentId}{
+
+            // Rules are inherited.
+          //}
+      
+        }
+      }
+    }
+
+  }
+}

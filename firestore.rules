@@ -1,0 +1,485 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      // get - used if a client with want to read this document.
+      // list - used if there is going to be a query returning this document.
+      // To make this rule cascade I'll have to use restOfPath=** wildcard otherwise it won't.
+      allow read, write: if false;
+    }
+
+    //========================For Alcoholic=========================
+
+    function isLoggedInAdmin(){
+      return request.auth != null && 
+      get(/databases/$(database)/documents/users/
+      $(request.auth.uid)).data.isAdmin == true;
+    }
+
+    function isLoggedInStoreOwner(){
+      return request.auth != null &&
+      get(/databases/$(database)/documents/users/
+      $(request.auth.uid)).data.isOwner == true;
+    }
+
+    function hasLoggedInAndOwnsThisStore(storeId){
+      return request.auth != null &&
+      request.auth.uid == get(/databases/
+      $(database)/documents/stores/$(storeId))
+      .data.storeOwner.userId;
+              
+    }
+
+    function isLoggedInStoreMember(storeId){
+      return if request.auth != null && 
+      exists(/databases/$(database)/documents/
+      stores/$(storeId)/store_joined_members/
+      $(request.auth.uid));
+    }
+
+    // 1
+    match /recent_wins/{recentWinId}{
+      // Everybody can see recent wins.
+      // read - Invoked Every Time A User Views The Recent Won Prices Screen (Screen 1).
+      // read - ****Unit Tested****
+      allow read: if true; 
+      // create - Invoked Whenever Somebody Wins A Competition.
+    }
+
+    // 2
+    // Only use /won_prices_summaries/{restOfPath=**} 
+    // if your rules will apply to sub collections as well.
+    // The above path can be either one of the following:
+    //     1. /won_prices_summaries/wonPriceSummaryId
+    //     2. /won_prices_summaries/wonPriceSummaryId/beg_requests/begRequestId
+    match /won_prices_summaries/{wonPriceSummaryId}{
+      
+      // Everybody can see a won price.
+      // To make this rule cascade I'll have to use restOfPath=** wildcard otherwise it won't.
+      // read - Invoked Each Time A Recent Winner's Image Is Clicked(Screen 1.1).
+      // read - ****Unit Tested****
+      allow read: if true; 
+      // create - // Invoked Whenever Somebody Wins A Competition.
+
+      // 3
+      match /beg_requests/{begRequestId}{
+        
+        // Everybody can see begging requests.
+        // read - // Invoked By A User When Viewing A Winner's Beggers(Screen 1.1.1).
+        // read - ****Unit Tested****
+        allow read: if true; 
+        // 1. Only allow logged in users can beg.
+        // 2. Remember to make sure the begger knows the winner.
+        // 3. Lastly recall to only allow one beg request for each user.
+        // create - // Invoked Whenever Any User Is Begging A Winner.
+        // create - ****Unit Tested****
+        allow create: if request.auth != null; 
+        
+      }
+    }
+
+    // 4
+    match /found_alcohol/{foundAlcoholId}{
+      // Everybody can search alcohol.
+      // read - 1. Invoked By Default During The Search Of An Alcohol If It Name Is Not Given(Screen 2).
+      //        2. Invoked By A User When Searching For Some Alcohol By Name(Screen 2.1).
+      // read - ****Unit Tested****
+      allow read: if true; 
+      // create - Invoked Each Time A Competition Is Created Is Saved.
+      // delete - Automatically Invoked Everyday.
+
+
+    }
+
+    // 5
+    // Only use /found_stores_with_competition/{restOfPath=**} 
+    // if your rules will apply to sub collections as well.
+    // The above path can be either one of the following:
+    //    1. /found_stores_with_competition/foundStoresWithCompetitionId
+    //    2. /found_stores_with_competition/foundStoresWithCompetitionId/found_grand_prices/foundGrandPriceId
+    match /found_stores_with_competition/{foundStoresWithCompetitionId}{
+      // Only a query is allowed to access this collection. Users don't.
+      // To make this rule cascade I'll have to use restOfPath=** wildcard otherwise it won't.
+      // I'll be using a group collection query using the store name property. 
+      // No single document access needs to be perfomed.
+      // read - ****Unit Tested****
+      allow list: if true; 
+      // create - Invoked Each Time A Competition Is Created.
+      // delete - Automatically Invoked If It Is Time For A Competition To Begin.
+      
+      // 6
+      match /found_grand_prices/{foundGrandPriceId}{
+      
+        // create - Invoked Each Time A Grand Price Is Saved.
+        // read - Invoked After A Store Without Competition Is Found.
+        allow list: if resource.data.owningStoreFK==foundStoresWithCompetitionId; 
+      }
+    }
+
+    // 7
+    match /found_stores_with_winner/{foundStoresWithWinnerId}{
+      
+      // Only a query is allowed to access this collection. Users don't.
+      // To make this rule cascade I'll have to use restOfPath=** wildcard otherwise it won't.
+      // I'll be using a group collection query using the store name property. 
+      // No single document access needs to be perfomed.
+      // read - ****Unit Tested****
+      allow list: true; 
+
+      // create - Invoked Each Time There Is A Winner.
+      // delete - Automatically Invoked After 24 Hours If And Only If Somebody Has 
+      //          Won And There Are Comming Competition(s) To Be Entered For The Store.
+      
+    }
+
+    // 8
+    match /found_stores_without_competition/{foundStoresWithoutCompetitionId}{
+      // Only a query is allowed to access this collection. Users don't.
+      // To make this rule cascade I'll have to use restOfPath=** wildcard otherwise it won't.
+      // I'll be using a group collection query using the store name property. 
+      // No single document access needs to be perfomed.
+      // read - ****Unit Tested****
+      allow list: true; 
+      // create - Automatically Invoked If It Is Time For A Competition To Begin.
+      // delete - Automatically Invoked After The Competition Has Completed.
+      
+    }
+
+    // 9
+    match /all_alcohol/{alcoholId}{
+      
+      allow write: if isLoggedInAdmin();
+      allow read: if isLoggedInOwner() || isLoggedInAdmin();
+      
+    }
+
+    // 12
+    match /available_alcohol/{alcoholId}{
+      // read - perfomed by store owners and admins.
+      allow read: if isLoggedInOwner() || isLoggedInAdmin();
+      
+      // create - only perfomed by store owners.
+      allow create: if isLoggedInOwner();
+      
+      // update - only perfomed by admins.
+      allow update: if isLoggedInAdmin();
+    }
+    
+    // 15
+    match /all_locations/{locationId}{
+
+      // read - // Only Store Owners And Admins Can Read A Location.
+      allow read: if isLoggedInAdmin() || isLoggedInStoreOwner();
+
+      // create - // Only Admins Can Create A Location.
+      allow create: if isLoggedInAdmin();
+
+      // update - // Only Admins Can Update A Locaiton.
+      allow update: if isLoggedInAdmin();
+    }
+
+    // 17
+    match /available_locations/{locationId}{
+
+      // read - // Anybody Can Read A Location.
+      allow read: if isLoggedInAdmin();
+
+      // create - Automatically Created If There Is A New Store
+      //          To Register Which Is The First One Residing There.
+      allow create: if false;
+      allow update: if isLoggedInAdmin();
+    }
+
+
+    // 22
+    // Only use /competitions/{restOfPath=**} if your rules will apply to sub collections as well.
+    // The above path can be either one of the following:
+    //      1. /competitions/competitionId
+    //      2. /competitions/competitionId/grand_prices_tokens/grandPriceTokenId
+    //      3. /competitions/competitionId/competitors_tokens/competitorTokenId
+    match /competitions/{competitionId}{
+      
+      // get - Invoked whenever one needs to view the competition(Screen 6.1.1).
+      allow get: if true; 
+      
+      // create - Automatically invoked when a competition is created(Screen 10.2.1).
+      allow create: if request.auth.uid != null &&
+      get(/databases/$(database)/documents/users/
+      $(request.auth.uid)).data.isOwner == true;
+      
+      // update - Automatically called by a program each time a grand price pointer is updated(Screen 2.2.1).
+
+      // 23
+      match /grand_prices_grid/{grandPriceGridId=**}{
+
+        // read - Automatically called each time a grand price pointer is updated(Screen 2.2.1).
+        // create - Automatically invoked after a competition is saved by a store owner(Screen 2.2.1).
+        // update - Automatically called each time a grand price pointer is updated(Screen 2.2.1).
+        // get - Invoked whenever one needs to view the competition(Screen 6.1.1).
+        allow get: if true; 
+        
+        // create - Automatically invoked when a competition is created(Screen 10.2.1).
+        allow create: if request.auth.uid != null &&
+        get(/databases/$(database)/documents/users/
+        $(request.auth.uid)).data.isOwner == true;
+
+        // 24
+        match /grand_price_tokens/{grandPriceTokenId}{
+          // read - Invoked when the competitions is about to begin(Screen 2.2.1).
+          // create - Automatically invoked when a competition grand price grid is created(Screen 2.2.1).
+          // update - Automatically called each time a grand price pointer is updated(Screen 2.2.1). 
+
+          // Rules Inherited
+        }
+      
+      }
+
+      // 25
+      match /competitors_grid/{competitorGridId=**}{
+        
+        // read - Automatically called each time a competitor pointer is updated(Screen 2.2.1.1).
+        // create - Automatically invoked after a competition is saved by a store owner(Screen 2.2.1.1).
+        // update - Automatically called each time a competitor pointer is updated(Screen 2.2.1.1).
+        allow get: if true; 
+        
+        // create - Automatically invoked when a competition is created(Screen 10.2.1).
+        allow create: if request.auth.uid != null &&
+        get(/databases/$(database)/documents/users/
+        $(request.auth.uid)).data.isOwner == true;
+
+        // 26
+        match /competitors_tokens/{competitorTokenId}{
+          // read - Invoked when the competitions has began, a price to win is chosen and a competitor to win is about to be picked.
+          // create - Automatically invoked when a competition competitor grid is created.
+          // update - Automatically called each time a grand price pointer is updated(Screen 2.2.1.1).
+        
+          // Rules Inherited
+        }
+      }
+
+      // 27
+      match /competition_joined_members/{competitionJoinedMemberUserId}{
+          
+          // create - Only owners can add/remove a member to a competition and if and only if they own the hosting store.
+          allow create, delete: if hasLoggedInAndOwnsThisStore(
+          get(/databases/$(database)/documents/competitions/
+          $(competitionId)).data.storeFK);
+
+          // read - Everyone can see who has joined a competition.
+          allow read: if true;
+
+          // update - A logged in user who happens to have joined a store competition can only change his/her image.
+          allow update, delete: if request.auth != null &&
+                request.resource.data.competitionJoinedMemberId = resource.data.competitionJoinedMemberId &&
+                request.resource.data.competitionFK = resource.data.competitionFK &&
+                request.resource.data.threeCharacters = resource.data.threeCharacters;
+          
+      }
+    }
+
+    // 28
+    // Only use /stores_names_info/{restOfPath=**} if your rules will apply to sub collections as well.
+    // The above path can be either one of the following:
+    //   1. /stores_names_info/storeNameInfoId
+    //   2. /stores_names_info/storeNameInfoId/stores_groups/storeGroupId
+    //   3. /stores_names_info/storeNameInfoId/stores_groups/storeGroupId//stores_posts/storePostId
+    //   4. /stores_names_info/storeNameInfoId/stores_groups/storeGroupId//stores_posts/storePostId/comments/commentId
+    match /stores_names_info/{storeNameInfoId}{
+      
+      // create - Invoked By A Store Owner Each Time A New Store Is Registered. (Screen 1.2)
+      // The create suppose to be automatic.
+      allow create: if hasLoggedInAndOwnsThisStore(storeNameInfoId); 
+
+      // read - Invoked whenever either of the following occured: (Screen 3.1)
+      //            1. The First Time The Stores Tab Is Clicked.
+      //            2. A Search By Store Name Is Initiated.
+      //            3. A Search By Section Name Is Initiated.
+      allow read: if true;
+
+      // 29
+      match /stores_groups/{storeGroupId}{
+
+        // create - Automatically called each time a store name is saved. (Screen 1.2)
+        allow create: if hasLoggedInAndOwnsThisStore(storeNameInfoId) && 
+              request.resource.data.storeNameInfoFK==storeNameInfoId; 
+
+        // read - Invoked whenever either of the following occured:
+        //            1. The First Time The Stores Tab Is Clicked.
+        //            2. A Search By Store Name Is Initiated.
+        //            3. A Search By Section Name Is Initiated. (Screen 3.1)
+        allow read: if true;
+
+        
+        match /normal_store_posts/{restOfPath=**}{
+          // 1. Only allow logged in users to post or comment.
+          // 2. Remember to make sure a user is a member of the store for one to post or comment.
+          // To make this rule cascade I'll have to use restOfPath=** wildcard otherwise it won't.
+          // get - 
+          // list - 
+          allow read: if true
+          
+          allow create: if isLoggedInStoreMember(storeNameInfoId);
+          
+          allow update, delete: if request.auth.uid == resource.data.creatorUserId; 
+          
+          
+          match /store_post_comments/{commentId}{ //(Screen 3.1)
+            // Rules are inherited.
+          }
+      
+        }
+
+        // 30
+        match /future_store_posts/{restOfPath=**}{
+          // 1. Only allow logged in users to post or comment.
+          // 2. Remember to make sure a user is a member of the store for one to post or comment.
+          // To make this rule cascade I'll have to use restOfPath=** wildcard otherwise it won't.
+          // get - ****Unit Tested****
+          // list - 
+          allow read: if true
+          
+          allow create: if isLoggedInStoreMember(storeNameInfoId);
+          
+          allow update, delete: if request.auth.uid == resource.data.creatorUserId; 
+
+          // 31
+          match /store_post_involved_users/{involvedUserId}{
+
+            // Rules are inherited.
+          }
+          
+          // 32
+          match /store_post_comments/{storePostcommentId}{ //(Screen 3.1)
+
+            // Rules are inherited.
+          }
+      
+        }
+
+        // 33
+        match /past_store_posts/{restOfPath=**}{
+          // 1. Only allow logged in users to post or comment.
+          // 2. Remember to make sure a user is a member of the store for one to post or comment.
+          // To make this rule cascade I'll have to use restOfPath=** wildcard otherwise it won't.
+          // get - ****Unit Tested****
+          // list - 
+          allow read: if true
+          
+          allow create: if isLoggedInStoreMember(storeNameInfoId);
+          
+          allow update, delete: if request.auth.uid == resource.data.creatorUserId; 
+
+          // 31
+          match /store_post_involved_users/{involvedUserId}{
+
+            // Rules are inherited.
+          }
+          
+          // 32
+          match /store_post_comments/{storePostcommentId}{
+
+            // Rules are inherited.
+          }
+      
+        }
+      }
+    }
+
+    // 40
+    match /users/{userId}{
+
+      // 1. Only allow a creation of a new user during a registration.
+        allow create: if request.auth == null;
+
+      // 41
+      match /people_who_know_you/{alcoholicToBeId}{
+        
+        // 1. Only allow logged in users to see people which are known by.
+        // 2. Remember users need to know each other in other to be each other's alcoholics.
+        // read, update, delete - ****Unit Tested****
+        allow read, update, delete: if request.auth != null && request.auth.uid==userId; 
+        allow create: if request.auth != null; 
+      }
+
+
+      // 42
+      // Must be saved twice, one for user 1, another for user 2.
+      // Two users need access to this collection.
+      match /conversations/{restOfPath=**}{
+        
+        // Remember users need to be each others alcoholics for them to chat. Ofcause they must be online.
+
+        // On create I assume the conversation is already on the request.resource.data object.
+        allow create: if request.auth != null && 
+
+        exists(/databases/$(database)/documents/
+        users/request.auth.uid/my_alcoholics/
+        request.resource.data.user2Id) &&
+        
+        exists(/databases/$(database)/documents/
+        users/request.resource.data.user2Id/my_alcoholics/
+        request.auth.uid);
+
+        // Only someone who is a part of this conversation can see it. Ofcause they must be online.
+        // get - // ****Unit Tested****
+        allow get: if request.auth != null &&
+        (resource.data.user1Id == userId || 
+        resource.data.user2Id == userId);
+
+        // 43
+        match /messages/{messageId}{
+          
+          // update - // ****Unit Tested****
+          allow update: if request.auth != null && 
+
+          // Users are only allowed to edit messages they created.
+          (userId == resource.data.senderId &&
+          request.resource.data.isRead = resource.data.isRead &&
+          request.resource.data.isLike = resource.data.isLike &&
+          request.resource.data.sentTime = resource.data.sentTime &&
+          request.resource.data.conversationFK = resource.data.conversationFK)
+          
+          ||
+
+          // Users can edit isLike or isRead of messages they recieved.
+          (userId == resource.data.receiverIdId &&
+          request.resource.data.text = resource.data.text &&
+          request.resource.data.sentTime = resource.data.sentTime &&
+          request.resource.data.conversationFK = resource.data.conversationFK);
+        }
+      }
+
+      // 44
+      match /my_stores_owners/{storeOwnerId}{
+        // 1. Only allow logged in users to see store owners for stores they've joined.
+        // 2. Remember users need to be each others alcoholics for them to see each other online.
+        // read - // ****Unit Tested****
+        allow read, create, delete: if request.auth != null && request.auth.uid==userId; 
+      }
+
+      // 45
+      match /beg_requests_summaries/{begRequestId}{
+        // 1. Only allow logged in users to see their beggers.
+        // 2. Remember only users who have won before are allowed.
+        
+        // read, update - // ****Unit Tested****
+        allow read, update, delete: if request.auth != null && request.auth.uid==userId; 
+        
+        allow create:  if request.auth != null;
+        
+      }
+
+      // 46
+      match /my_alcoholics/{alcoholicId}{
+        // create - automatically invoked whenever a user confirms he/she is known by the other user.
+        // update - automatically invoked whenever a particular user login, a competition is to be shared, or there is a prompts.
+        // delete - whenever a user no longer want to communicate with the other user or his/her alcoholic.
+        // read - whenever a user is view all online people.
+        
+        // read - // ****Unit Tested****
+        allow read, create, delete: if request.auth != null && request.auth.uid==userId; 
+      }
+    }
+  } 
+}
